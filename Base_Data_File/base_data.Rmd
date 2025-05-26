@@ -1,0 +1,79 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+
+```{r}
+
+library(arrow)
+library(httr)
+library(dplyr)
+
+# Base URL for the data
+base_url <- "https://intro-datascience.s3.us-east-2.amazonaws.com/SC-data/2023-houseData/"
+
+# Generate a list of building IDs (example: 102063 to 102562 for 500 buildings)
+building_ids <- 160000(160000+160000)
+
+# Local folder to save downloaded files
+output_folder <- "house_data"
+dir.create(output_folder, showWarnings = FALSE)
+
+# Initialize an empty list to store data
+house_data_list <- list()
+
+# Loop through building IDs
+for (id in building_ids) {
+  file_url <- paste0(base_url, id, ".parquet")  # Construct the file URL
+  file_path <- file.path(output_folder, paste0(id, ".parquet"))  # Local file path
+  
+  # Download the file
+  tryCatch({
+    GET(file_url, write_disk(file_path, overwrite = TRUE))
+    
+    # Read the Parquet file into R
+    house_data <- read_parquet(file_path)
+    
+    # Add to the list
+    house_data_list[[as.character(id)]] <- house_data
+    
+    cat("Successfully downloaded and read data for building ID:", id, "\n")
+  }, error = function(e) {
+    cat("Failed to download or read data for building ID:", id, "\n")
+  })
+}
+
+# Combine all data into a single data frame (if applicable)
+combined_data <- bind_rows(house_data_list, .id = "building_id")
+
+# Save the combined data as a CSV or Parquet (optional)
+#write.csv(combined_data, "combined_house_data.csv", row.names = FALSE)
+```
+```{r}
+unique(combined_data$building_id)
+```
+```{r}
+library(lubridate)
+library(tidyverse)
+library(dplyr)
+
+july_data <- combined_data %>%
+  mutate(time = ymd_hms(time)) %>%  # Ensure proper date-time format
+  filter(month(time) == 7)
+
+str(july_data)
+```
+```{r}
+View(july_data)
+
+```
+
+```{r}
+library(readr)
+
+# Export the data frame to a CSV file
+write_csv(july_data, "july_data_part2.csv")
+```
+

@@ -1,0 +1,436 @@
+---
+title: "Untitled"
+output:
+  pdf_document: default
+  html_document: default
+date: "2024-11-17"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r}
+library(ggplot2)
+library(arrow)
+library(randomForest)
+library(caret)
+library(tidyverse)
+dataf <- read_parquet("https://intro-datascience.s3.us-east-2.amazonaws.com/SC-data/static_house_info.parquet")
+#head(dataf, 50)
+#View(dataf)
+#tail(dataf, 50)
+#newdata <- dataf[, c(1,5,6,10,11,14,16,17,18,19,21,22,23,24,27,28,30,33,40,41,42,45,46,57,58,60,67,68,69,70,81,92,93,94,96,108,120,122,127,154,155,156,165)]
+#newdata
+sum(is.na(dataf))
+```
+
+```{r}
+
+unique(dataf$in.county)
+
+```
+
+```{r}
+climate_data <- read_csv("C:/Users/siddh/OneDrive/Documents/IDS_project/julyweather_data_updated1.csv")
+#head(climate_data,10)
+
+```
+```{r}
+july_data <- read_csv("C:/Users/siddh/OneDrive/Documents/IDS_project/july_data.csv")
+#View(july_data)
+```
+```{r}
+july_data$total_consumption <- rowSums(july_data[,2:43])
+#view(july_data)
+```
+
+```{r}
+ july_data <- july_data[,-2:-43]
+# view(july_data)
+```
+
+```{r}
+# renaming the building_id as bldg_id
+july_data$bldg_id <- july_data$building_id
+ # View(july_data)
+```
+
+```{r}
+# subtracting the building_id
+july_data <- july_data[,-1]
+# view(july_data)
+```
+
+```{r}
+merged_df_ener_hou<-merge.data.frame(july_data,dataf,by = 'bldg_id', sort = TRUE, all = FALSE)
+
+```
+
+```{r}
+merged_df_ener_hou$in.cooling_setpoint <- gsub("F", "", merged_df_ener_hou$in.cooling_setpoint)
+
+# Convert `in.cooling_setpoint` to numeric
+merged_df_ener_hou$in.cooling_setpoint <- as.numeric(merged_df_ener_hou$in.cooling_setpoint)
+merged_df_ener_hou$in.heating_setpoint <- gsub("F", "", merged_df_ener_hou$in.heating_setpoint)
+
+merged_df_ener_hou$in.cooling_setpoint_offset_magnitude <- 
+  gsub("F", "",merged_df_ener_hou$in.cooling_setpoint_offset_magnitude)
+merged_df_ener_hou$in.cooling_setpoint_offset_magnitude <- as.numeric(merged_df_ener_hou$in.cooling_setpoint_offset_magnitude)
+
+merged_df_ener_hou$in.heating_setpoint_offset_magnitude <- 
+  gsub("F", "",merged_df_ener_hou$in.heating_setpoint_offset_magnitude)
+merged_df_ener_hou$in.heating_setpoint_offset_magnitude <- as.numeric(merged_df_ener_hou$in.heating_setpoint_offset_magnitude)
+# Convert to numeric
+merged_df_ener_hou$in.heating_setpoint <- as.numeric(merged_df_ener_hou$in.heating_setpoint)
+
+num_variables <- select_if(merged_df_ener_hou, is.numeric)
+char_variables <- select_if(merged_df_ener_hou, is.character)
+
+chars <- char_variables %>%
+  mutate_all(as.factor) %>%
+  mutate_all(funs(as.numeric(as.factor(.))))
+
+predictor_var <- bind_cols(num_variables, chars)
+
+cors <- cor(predictor_var, use ="complete.obs",method = "pearson")
+cors_energy <- abs(cors[, "total_consumption"])
+sort(cors_energy, decreasing = TRUE)
+```
+
+```{r}
+constant_cols <- names(merged_df_ener_hou)[sapply(merged_df_ener_hou, function(col) length(unique(col)) == 1)]
+cat("Constant columns removed:\n")
+print(constant_cols)
+merged_df_ener_hou <- merged_df_ener_hou[, !names(merged_df_ener_hou) %in% constant_cols]
+
+
+#this column removes single valued cols
+#cause they dont contribute to any value in further analysis
+#because they lack variability and cannot help in identifying patterns or relationships.
+#Removing constant columns helps improve computational efficiency and model performance,
+
+```
+
+```{r}
+# Identify low variability categorical columns
+#low_var_categorical_cols <- names(merged_df_ener_hou)[sapply(merged_df_ener_hou, function(col) is.character(col) && length(unique(col)) < 3)]
+
+# Specify columns to keep
+#cols_to_keep <- c("in.cooling_setpoint_has_offset", "in.heating_setpoint_has_offset")
+
+# Filter out the columns to be removed
+#cols_to_remove <- setdiff(low_var_categorical_cols, cols_to_keep)
+
+#cat("Low variability categorical columns removed (excluding kept columns):\n")
+#print(cols_to_remove)
+
+# Remove the identified columns
+#merged_df_ener_hou <- merged_df_ener_hou[, !names(merged_df_ener_hou) %in% cols_to_remove]
+
+
+#remove columns with low varaince 
+# cause they wont be useful for understanding patterns
+
+```
+
+```{r}
+summary(merged_df_ener_hou)
+#View(merged_df_ener_hou)
+
+str(merged_df_ener_hou)
+
+```
+
+```{r}
+hist(merged_df_ener_hou$total_consumption, main = "Distribution of Total Consumption", 
+     xlab = "Total Consumption", breaks = 30, col = "blue")
+
+# represents a numeric measure of energy usage for a building at a specific hour
+# to understand how its spread on the dataset
+# majority values are concentrated around 0(positive skewed)
+# there looks there is some outliers we can confirm with boxplot
+```
+
+```{r}
+boxplot(merged_df_ener_hou$total_consumption, main = "Boxplot of Total Consumption", 
+        ylab = "Total Consumption")
+
+# the reason the boxplot lokks like this is cause of outliers in both ends
+# the energy consumed value extends below zero doesnt make sense cause there cant be negative values
+
+```
+
+
+
+```{r}
+merged_df_ener_hou <- merged_df_ener_hou[merged_df_ener_hou$total_consumption >= 0, ]
+boxplot(merged_df_ener_hou$total_consumption, main = "Boxplot of Total Consumption", 
+        ylab = "Total Consumption")
+
+
+# jus to confirm is negative values are removed
+```
+```{r}
+merged_df_ener_hou <- na.omit(merged_df_ener_hou)
+```
+```{r}
+sum(is.na(merged_df_ener_hou))
+```
+
+```{r}
+
+
+# Select specific building IDs
+building_ids <- c(65, 121)  # Replace with your desired building IDs
+
+# Filter the dataset for these building IDs
+filtered_data <- merged_df_ener_hou[merged_df_ener_hou$bldg_id %in% building_ids, ]
+
+# Ensure time is sorted for better plotting
+filtered_data <- filtered_data[order(filtered_data$time), ]
+
+# Plot the time series for selected building IDs
+ggplot(filtered_data, aes(x = time, y = total_consumption, color = factor(bldg_id))) +
+  geom_line() +
+  labs(
+    title = "Time Series for Selected Building IDs",
+    x = "Time",
+    y = "Total Consumption",
+    color = "Building ID"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  
+
+
+#it looks building 65 has more energy con5sumption than building 121
+#Building ID 121 may be smaller or have limited usage during the day.
+
+```
+
+
+```{r}
+
+# Select specific building IDs
+building_ids <- c(500, 504)  # Replace with your desired building IDs
+
+# Filter the dataset for these building IDs
+filtered_data <- merged_df_ener_hou[merged_df_ener_hou$bldg_id %in% building_ids, ]
+
+# Ensure time is sorted for better plotting
+filtered_data <- filtered_data[order(filtered_data$time), ]
+
+# Plot the time series for selected building IDs
+ggplot(filtered_data, aes(x = time, y = total_consumption, color = factor(bldg_id))) +
+  geom_line() +
+  labs(
+    title = "Time Series for Selected Building IDs",
+    x = "Time",
+    y = "Total Consumption",
+    color = "Building ID"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  
+
+#it looks like 500 building  has more energy consumption than building 504
+#Building ID 504 may be smaller or have limited usage during the day.
+```
+```{r}
+merged_df_ener_hou <- merged_df_ener_hou %>%
+  mutate(upgrade.water_heater_efficiency = na_if(upgrade.water_heater_efficiency, ""))
+unique(merged_df_ener_hou$upgrade.water_heater_efficiency)
+merged_df_ener_hou <- na.omit(merged_df_ener_hou)
+```
+
+```{r}
+
+
+# Split the data into training and testing (70%-30%)
+
+#train_indices <- createDataPartition(merged_df_ener_hou$total_consumption, p = 0.7, list = FALSE)
+training <- merged_df_ener_hou
+testing <- merged_df_ener_hou[merged_df_ener_hou$upgrade.water_heater_efficiency != "Electric Heat Pump, 66 gal, 3.35 UEF", ]
+
+
+```
+
+```{r}
+set.seed(123)
+
+sampled_data <- training[sample(1:nrow(training), size = 50000), ]  # Adjust size as needed
+rf_model <- randomForest(
+  total_consumption ~   in.cooling_setpoint_has_offset  +in.heating_setpoint_has_offset +
+    in.cooling_setpoint+I(in.cooling_setpoint^2)
+  + in.heating_setpoint+I(in.heating_setpoint^2),
+  data = sampled_data,
+  ntree = 500,
+  mtry = 4,
+  importance = TRUE
+)
+
+rf_model
+ #The Random Forest model explains 32.21% of the variance in `total_consumption`. 
+#This is significantly better than the linear regression model, which explained 
+# only ~20.95% variance.
+
+#and its better to handle non-linear relationship
+#In a linear model, a 1°F increase in in.cooling setpoint might always decrease total_consumption by the same amount
+```
+```{r}
+# Extract variable importance
+importance_vals <- importance(rf_model)
+
+# Plot importance
+varImpPlot(rf_model, main = "Variable Importance")
+```
+```{r}
+
+library(ggplot2)
+
+ggplot(merged_df_ener_hou, aes(x = in.occupants, 
+                 y = total_consumption, 
+                 color = upgrade.water_heater_efficiency)) +
+  geom_point() +
+  labs(title = "Relationship Between Efficiency, Consumption, and Occupants",
+       x = "Total Occupants",
+       y = "Total Consumption",
+       color = "Water Heater Efficiency")
+```
+```{r}
+set.seed(7)
+
+sampled_data <- training[sample(1:nrow(training), size = 50000,replace = TRUE), ]  # Adjust size as needed
+rf_model2 <- randomForest(
+  total_consumption ~ upgrade.water_heater_efficiency +in.occupants ,
+  data = sampled_data,
+  ntree = 500,
+  mtry = 2,
+  importance = TRUE
+)
+
+rf_model2
+
+```
+
+```{r}
+
+# Predict on test data
+rf_predictions <- predict(rf_model2, newdata = testing)
+str(rf_predictions)
+actual_values <- merged_df_ener_hou$total_consumption
+
+# Calculate R-squared
+SSE <- sum((actual_values - rf_predictions)^2)  # Sum of Squared Errors
+SST <- sum((actual_values - mean(actual_values))^2)  # Total Sum of Squares
+
+R_squared <- 1 - (SSE / SST)
+print(R_squared)
+
+# Calculate Metrics
+rf_rmse <- sqrt(mean((testing$total_consumption - rf_predictions)^2))
+#rf_rsq <- cor(testing$total_consumption, rf_predictions)^2
+rf_mae <- mean(abs(testing$total_consumption - rf_predictions))
+
+cat("RMSE: ", rf_rmse, "\n")
+#cat("R-squared: ", rf_rsq, "\n")
+cat("MAE: ", rf_mae, "\n")
+
+```
+```{r}
+new_df <-testing
+new_df$total_consumption <- rf_predictions
+
+library(ggplot2)
+
+combined_df <- rbind(
+  cbind(new_df, source = "new_df"),
+  cbind(testing, source = "testing")
+)
+
+# Plot using ggplot with faceting
+ggplot(combined_df, aes(x = in.occupants, y = total_consumption, fill = upgrade.water_heater_efficiency)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_wrap(~source, scales = "free") + # Create separate plots for each dataset
+  labs(title = "Relationship Between Efficiency, Consumption, and Occupants",
+       x = "Number of Occupants",
+       y = "Total Consumption",
+       fill = "Water Heater Efficiency")
+```
+
+```{r}
+
+lmOut<- lm(total_consumption ~ in.cooling_setpoint + I(in.cooling_setpoint^2)+in.heating_setpoint + I(in.heating_setpoint^2), 
+           data = merged_df_ener_hou)
+
+summary(lmOut)
+
+
+```
+```{r}
+set.seed(123)
+
+sampled_data <- training[sample(1:nrow(training), size = 50000,replace = TRUE), ]  # Adjust size as needed
+rf_model3 <- randomForest(
+  total_consumption ~  in.sqft+in.bedrooms+in.occupants+in.geometry_floor_area_bin+
+            in.geometry_floor_area,
+  data = sampled_data,
+  ntree = 500,
+  mtry = 5,
+  importance = TRUE
+)
+
+rf_model3
+```
+```{r}
+counties_to_search <- c("G4500190", "G4500790", "G4500130", "G4500510", "G4500910", "G4500350", "G4500450")
+filtered_data <- merged_df_ener_hou %>%
+  filter(in.county %in% counties_to_search)
+```
+```{r}
+
+# Split the data into training and testing (70%-30%)
+
+train_indices <- createDataPartition(filtered_data$total_consumption, p = 0.7, list = FALSE)
+training <- filtered_data[train_indices,]
+testing <- filtered_data[-train_indices,]
+
+```
+
+```{r}
+set.seed(123)
+
+sampled_data <- training[sample(1:nrow(training), size = 50000,replace=TRUE,),  ]  # Adjust size as needed
+rf_model4 <- randomForest(
+  total_consumption ~  in.sqft+in.occupants+in.geometry_floor_area_bin+
+            in.cooling_setpoint+in.heating_setpoint,
+  data = sampled_data
+)
+
+rf_model4
+
+```
+```{r}
+# Get feature importance scores
+importance_scores <- importance(rf_model4)
+
+# Sort features by importance
+sorted_features <- importance_scores[order(importance_scores, decreasing = TRUE), , drop = FALSE]
+
+sorted_features
+```
+```{r}
+#set.seed(123)
+
+#sampled_data <- training[sample(1:nrow(training), size = 50000), ]  # Adjust size as needed
+#rf_model3 <- randomForest(total_consumption ~  .,data = sampled_data)
+
+#rf_model3
+
+
+```

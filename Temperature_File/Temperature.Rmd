@@ -1,0 +1,227 @@
+---
+title: "Untitled"
+output:
+  pdf_document: default
+  html_document: default
+date: "2024-11-17"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r}
+library(arrow)
+library(tidyverse)
+dataf <- read_parquet("https://intro-datascience.s3.us-east-2.amazonaws.com/SC-data/static_house_info.parquet")
+head(dataf, 10)
+tail(dataf, 10)
+newdata <- dataf[, c(1,5,6,10,11,14,16,17,18,19,21,22,23,24,27,28,30,33,40,41,42,45,46,57,58,60,67,68,69,70,81,92,93,94,96,108,120,122,127,154,155,156,165)]
+#newdata
+sum(is.na(newdata))
+```
+```{r}
+unique(newdata$in.county)
+
+```
+
+```{r}
+climate_data <- read_csv("C:/Users/siddh/OneDrive/Documents/IDS_project/julyweather_data_updated1.csv")
+head(climate_data,10)
+
+```
+```{r}
+july_data <- read_csv("C:/Users/siddh/OneDrive/Documents/IDS_project/july_data.csv")
+#  View(july_data)
+```
+```{r}
+july_data$total_consumption <- rowSums(july_data[,2:43])
+#view(july_data)
+```
+
+```{r}
+ july_data <- july_data[,-2:-43]
+# view(july_data)
+```
+
+```{r}
+# renaming the building_id as bldg_id
+july_data$bldg_id <- july_data$building_id
+ # View(july_data)
+```
+
+```{r}
+# subtracting the building_id
+july_data <- july_data[,-1]
+#view(july_data)
+```
+
+```{r}
+house_energy_merged <-merge.data.frame(july_data,newdata,by = 'bldg_id', sort = TRUE, all = FALSE)
+head(house_energy_merged,10)
+```
+```{r}
+weather_house_merged <-merge.data.frame(newdata,climate_data,by.x = 'in.county',by.y = 'county_code', sort = TRUE, all = FALSE)
+head(weather_house_merged,10)
+```
+
+```{r}
+
+#View(july_data)
+
+```
+
+
+```{r}
+
+result <- merge(weather_house_merged, july_data, by.x = c('bldg_id', 'date_time'), by.y = c('bldg_id', 'time'), all = FALSE)
+head(result,10)
+```
+```{r}
+
+#View(result)
+summary(result)
+```
+
+```{r}
+
+result <- result[result$total_consumption >= 0, ]
+boxplot(result$total_consumption, main = "Boxplot of Total Consumption", 
+        ylab = "Total Consumption")
+# removing negative values 
+
+```
+```{r}
+sum(is.na(result))
+
+```
+
+```{r}
+county_energy_consumption <- result %>%
+  group_by(in.county) %>%
+  summarize(TotalEnergyConsumption = sum(total_consumption, na.rm = TRUE)) %>%
+  arrange(desc(TotalEnergyConsumption))
+
+ggplot(county_energy_consumption, aes(x = TotalEnergyConsumption, y = fct_reorder(in.county, desc(TotalEnergyConsumption)))) +
+  geom_bar(stat = "identity", fill = "blue") +
+  labs(
+    x = "Total Energy Consumption",
+    y = "County",
+    title = "County-wise Energy Consumption (Descending Order)"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+
+daily_energy_consumption <- result %>%
+  group_by(Date = as.Date(floor_date(date_time, unit = "days")),in.county) %>%
+  summarize(DailyEnergyConsumption = sum(total_consumption, na.rm = TRUE))
+
+# Create a ggplot object for the daily energy consumption trend
+ggplot(daily_energy_consumption, aes(x = Date, y = DailyEnergyConsumption,fill = in.county)) +
+  geom_bar(stat = "identity") +  # Use geom_bar with stat = "identity" for actual values
+  labs(
+    x = "Date",
+    y = "Daily Energy Consumption",
+    title = "Daily Energy Consumption by County",
+    fill = "County"
+  ) +
+  theme_minimal()
+ 
+```
+
+```{r}
+# Split the data into training and testing (70%-30%)
+
+#train_indices <- createDataPartition(result$total_consumption, p = 0.7, list = FALSE)
+training <- data.frame(result[,c("Dry.Bulb.Temperature...C.","total_consumption")])
+testing <- data.frame(result[,c("Dry.Bulb.Temperature...C.","total_consumption") ])
+testing$Dry.Bulb.Temperature...C. <- testing$Dry.Bulb.Temperature...C. + 5.0
+sum(is.na(training))
+sum(is.na(testing))
+```
+
+```{r}
+library(randomForest)
+sampled_data <- training[sample(1:nrow(training), size = 50000), ]  # Adjust size as needed
+rf_model <- randomForest(
+  total_consumption ~ Dry.Bulb.Temperature...C.,
+  data = sampled_data,
+  ntree = 200,
+  mtry = 1,
+  importance = TRUE
+)
+
+rf_model
+```
+
+```{r}
+rf_pred<- predict(rf_model, testing)
+
+rf_rmse <- sqrt(mean((testing$total_consumption - rf_pred)^2))
+rf_rsq <- cor(testing$total_consumption, rf_pred)^2
+rf_mae <- mean(abs(testing$total_consumption - rf_pred))
+
+rf_rmse
+rf_rsq
+rf_mae
+```
+
+```{r}
+testing$rf_pred <- rf_pred
+
+#testing$rf_pred <- PredictedConsumption
+comparison_data <- testing %>%
+  mutate(Scenario = "Modified") %>%
+  rbind(
+    training %>%
+      mutate(
+        rf_pred = predict(rf_model, training),
+        Scenario = "Original"
+      )
+  )
+
+# Plot comparison using ggplot
+ggplot(comparison_data, aes(x = Dry.Bulb.Temperature...C., y = rf_pred, color = Scenario)) +
+  geom_point(alpha = 0.6) +
+  labs(
+    x = "Dry Bulb Temperature (°C)",
+    y = "Total Consumption",
+    title = "Comparison of Original and Modified Predictions",
+    color = "Scenario"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+set.seed(123)
+mean_diff_squares <- replicate(
+  10000,
+  (
+    # Sample means from predicted and actual datasets
+    mean(sample(rf_pred, size = 100000, replace = TRUE)) -
+    mean(sample(result$total_consumption, size = 100000, replace = TRUE))
+    
+    
+  )
+)
+
+```
+
+```{r}
+
+hist(mean_diff_squares, breaks = 50, main = "Distribution of Mean Differences ", 
+     xlab = " Mean Differences")
+
+
+quantile(mean_diff_squares,probs = c(0.025,0.975))
+abline(v=quantile(mean_diff_squares,0.025))
+abline(v=quantile(mean_diff_squares,0.975))
+```
